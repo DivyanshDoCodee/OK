@@ -1,0 +1,11 @@
+{
+    "name": "Admin User",
+    "email": "admin@gmail.com",
+    "password": "admin",
+    "company_name": "",
+    "role": "admin",
+    "deleted_at": null,
+    "status": true,
+    "created_at": new Date(),
+    "updated_at": new Date()
+}
