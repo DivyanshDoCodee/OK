@@ -472,6 +472,20 @@ app.post("/login", async (req, res) => {
 
         } catch (ldapError) {
             console.error('LDAP authentication error:', ldapError);
+            
+            // Check for specific error types
+            if (ldapError.message.includes('timeout')) {
+                return res.status(503).json({
+                    success: false,
+                    message: "Authentication service is not responding. Please try again later."
+                });
+            } else if (ldapError.message.includes('connection')) {
+                return res.status(503).json({
+                    success: false,
+                    message: "Unable to connect to authentication service. Please try again later."
+                });
+            }
+
             return res.status(503).json({
                 success: false,
                 message: "Authentication service temporarily unavailable"
