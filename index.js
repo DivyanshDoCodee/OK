@@ -441,28 +441,35 @@ app.post("/login", async (req, res) => {
     }
 
     try {
+        console.log('Login attempt for:', email);
+
         // Step 1: Verify user exists in MongoDB
         const user = await UserModel.findOne({ email: email });
 
         if (!user) {
-            console.log(`Login attempt failed: User not found - ${email}`);
+            console.log(`Login attempt failed: User not found in MongoDB - ${email}`);
             return res.status(401).json({
                 success: false,
                 message: "Invalid credentials"
             });
         }
 
+        console.log('User found in MongoDB, attempting LDAP authentication');
+
         // Step 2: Verify credentials against LDAP
         try {
             const isLDAPAuthenticated = await verifyLDAPCredentials(email, password);
 
             if (!isLDAPAuthenticated) {
-                console.log(`Login attempt failed: Invalid credentials - ${email}`);
+                console.log(`Login attempt failed: LDAP authentication failed - ${email}`);
                 return res.status(401).json({
                     success: false,
                     message: "Invalid credentials"
                 });
             }
+
+            console.log('LDAP authentication successful, generating token');
+
         } catch (ldapError) {
             console.error('LDAP authentication error:', ldapError);
             return res.status(503).json({
