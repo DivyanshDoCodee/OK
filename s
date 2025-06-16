@@ -443,33 +443,92 @@ app.post("/login", async (req, res) => {
     try {
         console.log('Login attempt for:', email);
 
-        // Step 1: Try LDAP authentication first
+        // First check if user exists in MongoDB
+        let user = await UserModel.findOne({ email: email });
+        
+        if (user) {
+            // If user exists, try LDAP first if they are an LDAP user
+            if (user.authType === 'ldap') {
+                try {
+                    console.log('Attempting LDAP authentication for existing user');
+                    const isLDAPAuthenticated = await verifyLDAPCredentials(email, password);
+                    
+                    if (isLDAPAuthenticated) {
+                        console.log('LDAP authentication successful');
+                        const token = jwt.sign(
+                            { 
+                                userId: user._id,
+                                email: user.email,
+                                role: user.role
+                            },
+                            config.jwt.secret,
+                            { expiresIn: config.jwt.expiresIn }
+                        );
+                        return res.json({
+                            success: true,
+                            token,
+                            user: {
+                                id: user._id,
+                                name: user.name,
+                                email: user.email,
+                                role: user.role
+                            }
+                        });
+                    }
+                } catch (ldapError) {
+                    console.error('LDAP authentication failed:', ldapError);
+                    return res.status(401).json({
+                        success: false,
+                        message: "LDAP authentication failed"
+                    });
+                }
+            } else {
+                // For non-LDAP users, check MongoDB password
+                if (user.password === password) {  // In production, use proper password hashing
+                    console.log('MongoDB authentication successful');
+                    const token = jwt.sign(
+                        { 
+                            userId: user._id,
+                            email: user.email,
+                            role: user.role
+                        },
+                        config.jwt.secret,
+                        { expiresIn: config.jwt.expiresIn }
+                    );
+                    return res.json({
+                        success: true,
+                        token,
+                        user: {
+                            id: user._id,
+                            name: user.name,
+                            email: user.email,
+                            role: user.role
+                        }
+                    });
+                }
+            }
+        }
+
+        // If user doesn't exist in MongoDB or authentication failed, try LDAP
         try {
-            console.log('Attempting LDAP authentication');
+            console.log('Attempting LDAP authentication for new user');
             const isLDAPAuthenticated = await verifyLDAPCredentials(email, password);
             
             if (isLDAPAuthenticated) {
                 console.log('LDAP authentication successful');
                 
-                // Check if user exists in MongoDB
-                let user = await UserModel.findOne({ email: email });
-                
-                // If user doesn't exist in MongoDB, create one
-                if (!user) {
-                    console.log('Creating new user in MongoDB for LDAP user');
-                    user = new UserModel({
-                        email: email,
-                        name: email.split('@')[0],
-                        password: null, // Don't store any password for LDAP users
-                        role: 'user',
-                        status: true,
-                        authType: 'ldap' // Mark this user as LDAP authenticated
-                    });
-                    await user.save();
-                    console.log('New user created in MongoDB');
-                }
+                // Create new user in MongoDB if LDAP auth succeeds
+                user = new UserModel({
+                    email: email,
+                    name: email.split('@')[0],
+                    password: null,
+                    role: 'user',
+                    status: true,
+                    authType: 'ldap'
+                });
+                await user.save();
+                console.log('New user created in MongoDB');
 
-                // Generate JWT token
                 const token = jwt.sign(
                     { 
                         userId: user._id,
@@ -480,57 +539,32 @@ app.post("/login", async (req, res) => {
                     { expiresIn: config.jwt.expiresIn }
                 );
 
-                // Return success response
                 return res.json({
                     success: true,
-                    message: "Login successful",
-                    token: token,
+                    token,
                     user: {
-                        _id: user._id,
-                        email: user.email,
+                        id: user._id,
                         name: user.name,
+                        email: user.email,
                         role: user.role
                     }
                 });
             }
         } catch (ldapError) {
-            console.error('LDAP authentication error:', ldapError);
-            
-            // Handle specific LDAP errors
-            if (ldapError.message.includes('timeout')) {
-                return res.status(503).json({
-                    success: false,
-                    message: "LDAP server is currently unreachable. Please try again later or contact support.",
-                    error: "LDAP_CONNECTION_TIMEOUT"
-                });
-            } else if (ldapError.code === 49) {
-                return res.status(401).json({
-                    success: false,
-                    message: "Invalid credentials",
-                    error: "LDAP_INVALID_CREDENTIALS"
-                });
-            } else {
-                return res.status(503).json({
-                    success: false,
-                    message: "LDAP authentication service is currently unavailable",
-                    error: "LDAP_SERVICE_ERROR"
-                });
-            }
+            console.error('LDAP authentication failed:', ldapError);
         }
 
-        // If we get here, LDAP authentication failed
+        // If all authentication attempts fail
         return res.status(401).json({
             success: false,
-            message: "Invalid credentials. Please check your email and password.",
-            error: "INVALID_CREDENTIALS"
+            message: "Invalid email or password"
         });
 
     } catch (error) {
         console.error('Login error:', error);
         return res.status(500).json({
             success: false,
-            message: "Internal server error",
-            error: "INTERNAL_SERVER_ERROR"
+            message: "An error occurred during login"
         });
     }
 });
